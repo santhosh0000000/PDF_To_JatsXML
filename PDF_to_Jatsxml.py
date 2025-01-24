@@ -29,10 +29,10 @@ logging.basicConfig(
 
 def establish_database_connection():
     try:
-        conn = psycopg2.connect(database="ojs",
-                                host="db.eai.eu",
-                                user="ojs",
-                                password="Mypt|OdEevEb2",
+        conn = psycopg2.connect(database="xxx",
+                                host="xxxx",
+                                user="xxx",
+                                password="xxxx",
                                 port="5432")
         return conn
     except Exception as e:
