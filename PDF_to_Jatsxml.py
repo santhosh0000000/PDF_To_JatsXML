@@ -8,7 +8,8 @@ from dateutil import parser as date_parser
 import string
 import requests
 import subprocess
-
+import shutil
+import zipfile
 import fitz  # PyMuPDF
 from PIL import Image
 import io
@@ -18,8 +19,6 @@ import string
 import concurrent.futures
 from datetime import datetime, date
 
-
-
 logging.basicConfig(
     filename='API.log',
     filemode='a',
@@ -27,27 +26,29 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+
 def establish_database_connection():
     try:
-        conn = psycopg2.connect(database="xxx",
-                                host="xxx",
-                                user="xxx",
-                                password="xxx",
+        conn = psycopg2.connect(database="ojs",
+                                host="db.eai.eu",
+                                user="ojs",
+                                password="Mypt|OdEevEb2",
                                 port="5432")
         return conn
     except Exception as e:
         logging.error("Error connecting to the database: %s", str(e))
         raise
+
+
 def get_metadata_by_con(doi):
     conn = establish_database_connection()
     cursor = conn.cursor()
     try:
 
         sql = """
-        SELECT
         xxxx
-        WHERE
-            xxxxx = %s;"""
+             
+            """
         cursor.execute(sql, (doi,))
         rows = cursor.fetchall()
         for row in rows:
@@ -58,15 +59,16 @@ def get_metadata_by_con(doi):
         raise
     finally:
         conn.close()
+
+
 def get_metadata_by_doi(doi):
     conn = establish_database_connection()
     cursor = conn.cursor()
     try:
         sql = """
-        SELECT
-            xxx
-        WHERE
-            xxx = %s;"""
+         
+        
+            xxxx"""
         cursor.execute(sql, (doi,))
         row = cursor.fetchone()
         return row
@@ -75,14 +77,14 @@ def get_metadata_by_doi(doi):
         raise
     finally:
         conn.close()
+
+
 def get_dois_by_acronym(acronym):
     conn = establish_database_connection()
     cursor = conn.cursor()
     try:
-        # Updated SQL query with parameterized input for the acronym
         sql = """
-        SELECT xxx = %s  
-        ORDER BY g.xxx DESC;
+        xxxx
         """
         cursor.execute(sql, (acronym,))
         rows = cursor.fetchall()
@@ -109,7 +111,38 @@ def get_dois_by_acronym(acronym):
     finally:
         conn.close()
 
+def get_dois_by_download(acronym):
+    conn = establish_database_connection()
+    cursor = conn.cursor()
+    try:
+        # Updated SQL query with parameterized input for the acronym
+        sql = """
+       
+          xxx = %s
+        """
+        cursor.execute(sql, (acronym,))
+        rows = cursor.fetchall()
 
+        # Check if results are empty
+        if not rows:
+            logging.info("No DOIs found for the acronym: %s", acronym)
+            return None  # Return None if no rows are found
+
+        # Return the first row with the required information
+        row = rows[0]
+        return {
+            "doi": row[0],
+            "submission_id": row[1],
+            "galley_id": row[2],
+            "submission_file_id": row[3],
+            "journal_path": row[4],
+        }
+
+    except Exception as e:
+        logging.error("Error fetching DOIs for acronym '%s': %s", acronym, str(e))
+        raise
+    finally:
+        conn.close()
 
 def read_file_with_encoding(file_path):
     try:
@@ -119,8 +152,11 @@ def read_file_with_encoding(file_path):
         with open(file_path, "r", encoding="latin1") as f:
             return f.read()
 
+
 def download_pdf(pdf_number):
-    pdf_url = f"https://eudl.eu/pdf/{pdf_number}"
+    DOI, Submission_ID, Galley_ID, Submission_File_ID, Journal_Path = get_dois_by_download(pdf_number)
+    pdf_url = f"https://publications.eai.eu/index.php/{Journal_Path}/article/download/{Submission_ID}/{Galley_ID}/{Submission_File_ID}"
+
     directory_name = pdf_number.replace("/", "_").replace(".", "_")
     file_name = f"{directory_name}.pdf"
     full_directory_path = os.path.join(os.getcwd(), directory_name)
@@ -137,6 +173,7 @@ def download_pdf(pdf_number):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error downloading PDF: {e}")
         return None, None
+
 
 def get_json(directory, file_name):
     json_file_name = file_name.replace(".pdf", ".json")
@@ -168,6 +205,7 @@ def get_json(directory, file_name):
             return None
     except subprocess.CalledProcessError as e:
         return None
+
 
 def extract_pub_history_from_json(json_file):
     try:
@@ -222,10 +260,7 @@ def extract_pub_history_from_json(json_file):
 
 
 def extract_image_from_pdf(pdf_directory, output_directory, image_info):
-    """
-    Extract an image from the given PDF using the provided image_info dictionary.
-    Saves the image with a consistent naming convention and returns the saved path.
-    """
+
     try:
         pdf_file = next((file for file in os.listdir(pdf_directory) if file.endswith(".pdf")), None)
         if not pdf_file:
@@ -262,10 +297,7 @@ def extract_image_from_pdf(pdf_directory, output_directory, image_info):
 
 
 def create_body_from_json(json_file_path, pdf_directory):
-    """
-    Create an XML <body> element from JSON input and extract images for captions that follow pictures.
-    Generates structured XML with label, caption, and graphic for each figure.
-    """
+
     try:
         with open(json_file_path, 'r', encoding='utf-8') as file:
             json_data = json.load(file)
@@ -281,7 +313,6 @@ def create_body_from_json(json_file_path, pdf_directory):
             if "header" in item_type:
                 continue  # Skip headers
 
-            # Add text or captions that do not follow the "Figure" format directly to <p>
             if item_type in ["text", "list item", "page footer", "caption"] and not text.startswith("Figure"):
                 p = ET.SubElement(body, "p")
                 p.text = text
@@ -365,6 +396,7 @@ def read_json_file(file_path):
         print(f"Error: The file at {file_path} is not a valid JSON file.")
         return None
 
+
 def extract_copyright_line(data):
     for item in data:
         text = item.get('text', '')
@@ -372,7 +404,6 @@ def extract_copyright_line(data):
             # Simplify the copyright statement
             return text.strip().split(', licensed to')[0]
     return "Copyright information not found."
-
 
 def extract_license_description(data):
     for item in data:
@@ -412,6 +443,7 @@ def generate_permissions_xml(data):
     xml_str = ET.tostring(permissions, encoding="unicode", method="xml")
     return xml_str
 
+
 def save_dois_to_csv(dois, output_file='data/id_possition/doi_list.csv'):
     try:
         with open(output_file, mode='w', newline='', encoding='utf-8') as file:
@@ -449,7 +481,6 @@ def create_pub_date_xml(publication_date):
             month = f"{pub_date.month:02d}"
             day = f"{pub_date.day:02d}"
 
-        # Create the XML structure
         # Subscription year
         sub_year = ET.Element("pub-date", {"pub-type": "subscription-year"})
         ET.SubElement(sub_year, "year").text = str(year)
@@ -466,15 +497,15 @@ def create_pub_date_xml(publication_date):
         ET.SubElement(epub, "month").text = month
         ET.SubElement(epub, "year").text = str(year)
 
-        # Return the combined elements (not a string)
         root = ET.Element("pub-date-group")
         root.extend([sub_year, ppub, epub])
 
-        return root  # Return the root element containing all the pub-date elements
+        return root
 
     except Exception as e:
         logging.error("Error creating XML for publication date: %s", str(e))
         raise
+
 
 def update_journal_meta_with_article_and_body(doi, output_file_name, pub_history_xml, json_file, pdf_directory):
     if not doi:
@@ -482,11 +513,12 @@ def update_journal_meta_with_article_and_body(doi, output_file_name, pub_history
         return
 
     metadata = get_metadata_by_doi(doi)
+
     if not metadata:
         logging.error("No metadata found for DOI: %s", doi)
         return
     with open("data/id_possition/currentdoi.txt", "a") as doi_file:
-        doi_file.write(f"{doi}, {metadata[1]}\n")  # Appends DOI with a newline
+        doi_file.write(f"{doi}, {metadata[11]}\n")  # Appends DOI with a newline
 
     root = ET.Element("root")
     front = ET.SubElement(root, "front")
@@ -541,10 +573,20 @@ def update_journal_meta_with_article_and_body(doi, output_file_name, pub_history
     else:
         logging.error("Body creation failed; skipping body appending.")
 
-    output_file_path = os.path.join(pdf_directory, output_file_name)
-    with open(output_file_path, "wb") as f:
-        f.write(ET.tostring(root, encoding="utf-8", xml_declaration=True))
-    print(f"Output saved to {output_file_path}")
+    if os.path.exists(json_file):
+        os.remove(json_file)
+        logging.info(f"JSON file {json_file} removed.")
+
+        # Zip the PDF directory
+    zip_file_path = os.path.join(pdf_directory, f"{output_file_name}.zip")
+    with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for folder_name, subfolders, filenames in os.walk(pdf_directory):
+            for filename in filenames:
+                file_path = os.path.join(folder_name, filename)
+                zipf.write(file_path, os.path.relpath(file_path, pdf_directory))
+
+    logging.info(f"PDF directory {pdf_directory} zipped successfully to {zip_file_path}")
+
 
 def process_doi(doi, output_file_name):
     try:
@@ -568,7 +610,6 @@ def main():
     output_file_name = "output.xml"
 
     try:
-        # Ask user for input
         data = input("Enter 'acronym' to fetch DOIs or 'direct' to process the DOI list directly: ").strip()
 
         if data == "acronym":
@@ -583,7 +624,6 @@ def main():
                 print("No DOIs found for the provided acronym.")
 
         elif data == 'direct':
-            # Read the last processed DOIs from currentdoi.txt
             processed_dois = set()
             if os.path.exists("data/id_possition/currentdoi.txt"):
                 with open("data/id_possition/currentdoi.txt", mode="r", encoding="utf-8") as current_doi_file:
@@ -594,10 +634,8 @@ def main():
             # Read the list of DOIs from doi_list.csv
             with open("data/id_possition/doi_list.csv", mode="r", newline="", encoding="utf-8") as file:
                 reader = csv.reader(file)
-                # Skip the header row and collect all valid DOIs
                 do_list = [row[0].strip() for i, row in enumerate(reader) if i > 0 and row]
 
-            # Remove processed DOIs from do_list
             do_list = [doi for doi in do_list if doi not in processed_dois]
 
             if not do_list:
@@ -606,14 +644,14 @@ def main():
 
             print(f"Processing {len(do_list)} DOIs...")
 
-            # Process remaining DOIs using ThreadPoolExecutor
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 futures = [executor.submit(process_doi, doi, output_file_name) for doi in do_list]
 
                 for future, doi in zip(concurrent.futures.as_completed(futures), do_list):
-                    # Save the current DOI after it is processed
-                    with open("data/id_possition/currentdoi.txt", mode="a", encoding="utf-8") as current_doi_file:
-                        current_doi_file.write(f"{doi}\n")
+                    pass
+
+                    # with open("data/id_possition/doi.txt", mode="a", encoding="utf-8") as current_doi_file:
+                    #     current_doi_file.write(f"{doi}\n")
 
             print("DOI processing completed.")
 
